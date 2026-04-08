@@ -18,6 +18,7 @@ from . import gguf_inspector
 from . import optimizer as opt_module
 from . import model_scanner
 from . import server_process as sp_module
+from . import tool_validator
 
 router = APIRouter()
 
@@ -256,6 +257,52 @@ async def update_settings(request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save settings: {e}")
     return settings
+
+
+# ------------------------------------------------------------------
+# Tool validation endpoints
+# ------------------------------------------------------------------
+
+@router.post("/validate-tool-call")
+async def validate_tool_call(request: Request):
+    """
+    Validate a tool call before execution. Also recovers XML leaks.
+
+    Body: { "name": "tool_name", "arguments": {...} }
+    Or:   { "raw_text": "model output with <tool_call> tags" }
+    """
+    body = await request.json()
+
+    # If raw_text is provided, try to extract tool calls from XML leaks
+    if "raw_text" in body:
+        cleaned, extracted = tool_validator.clean_response(body["raw_text"])
+        validated = []
+        errors = []
+        for tc in extracted:
+            try:
+                v = tool_validator.validate_tool_call(tc)
+                validated.append(v)
+            except tool_validator.ToolCallValidationError as e:
+                errors.append({"tool": tc.get("name"), "error": str(e)})
+        return {
+            "cleaned_text": cleaned,
+            "tool_calls": validated,
+            "errors": errors,
+            "xml_leak_detected": tool_validator.is_xml_leak(body["raw_text"]),
+        }
+
+    # Direct tool call validation
+    try:
+        result = tool_validator.validate_tool_call(body)
+        return {"valid": True, "tool_call": result}
+    except tool_validator.ToolCallValidationError as e:
+        return {"valid": False, "error": str(e)}
+
+
+@router.get("/tool-stats")
+async def tool_stats():
+    """Return tool call validation stats for debugging."""
+    return tool_validator.get_validation_stats()
 
 
 # ------------------------------------------------------------------
