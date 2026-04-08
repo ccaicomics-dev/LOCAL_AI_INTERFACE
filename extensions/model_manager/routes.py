@@ -19,6 +19,7 @@ from . import optimizer as opt_module
 from . import model_scanner
 from . import server_process as sp_module
 from . import tool_validator
+from . import auto_optimizer
 
 router = APIRouter()
 
@@ -303,6 +304,101 @@ async def validate_tool_call(request: Request):
 async def tool_stats():
     """Return tool call validation stats for debugging."""
     return tool_validator.get_validation_stats()
+
+
+# ------------------------------------------------------------------
+# Auto-optimization endpoints
+# ------------------------------------------------------------------
+
+class AutoOptimizeRequest(BaseModel):
+    model_path: Optional[str] = None
+    max_iterations: int = 10
+
+
+@router.post("/auto-optimize")
+async def run_auto_optimize(req: AutoOptimizeRequest):
+    """
+    Run the autoresearch-style self-optimization loop.
+    Benchmarks current settings, tries variations, keeps improvements.
+    Returns SSE stream of progress events.
+
+    Requires a model to already be loaded.
+    """
+    server = sp_module.get_server()
+    if not server.is_running:
+        async def error_stream():
+            yield {"step": "error", "message": "No model loaded. Load a model first, then run auto-optimize."}
+        return StreamingResponse(
+            _event_stream(error_stream()),
+            media_type="text/event-stream",
+        )
+
+    model_path = req.model_path or server.loaded_model_path
+    model_name = server.loaded_model_name or "Unknown"
+
+    settings = _load_settings()
+    llama_binary = settings.get("llama_server_path")
+    if not llama_binary:
+        import shutil
+        llama_binary = shutil.which("llama-server") or shutil.which("llama-server.exe")
+    if not llama_binary:
+        async def error_stream():
+            yield {"step": "error", "message": "llama-server binary not configured."}
+        return StreamingResponse(
+            _event_stream(error_stream()),
+            media_type="text/event-stream",
+        )
+
+    hw = hw_module.detect_hardware()
+    model_info = gguf_inspector.inspect_model(model_path)
+    current_flags = server._flags_used or {}
+
+    async def optimize_stream():
+        async for event in auto_optimizer.auto_optimize(
+            model_path=model_path,
+            model_name=model_name,
+            current_flags=current_flags,
+            llama_server_binary=llama_binary,
+            hw=hw,
+            is_moe=model_info.get("is_moe", False),
+            max_iterations=req.max_iterations,
+        ):
+            yield event
+
+    return StreamingResponse(
+        _event_stream(optimize_stream()),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/auto-optimize/history")
+async def optimization_history():
+    """Return past optimization results."""
+    return auto_optimizer.get_optimization_history()
+
+
+@router.post("/benchmark")
+async def run_benchmark(request: Request):
+    """
+    Run a quick benchmark on the currently loaded model.
+    Returns tokens/sec and timing info.
+    """
+    server = sp_module.get_server()
+    if not server.is_running:
+        raise HTTPException(status_code=400, detail="No model loaded")
+
+    body = await request.json() if request.headers.get("content-type") == "application/json" else {}
+    max_tokens = body.get("max_tokens", 100)
+
+    result = auto_optimizer.run_benchmark(max_tokens=max_tokens)
+    return {
+        "tokens_per_second": result.tokens_per_second,
+        "total_tokens": result.total_tokens,
+        "duration_seconds": result.duration_seconds,
+        "error": result.error,
+        "success": result.success,
+    }
 
 
 # ------------------------------------------------------------------

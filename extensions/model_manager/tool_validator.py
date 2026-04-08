@@ -54,7 +54,8 @@ _KNOWN_TOOLS = {
     "inspect_gguf_model", "generate_optimal_config", "check_llama_server",
     "find_models_on_system", "web_search", "web_fetch", "todo_write",
     "ask_user_question", "schedule_task", "analyze_code",
-    "manage_process", "run_python",
+    "manage_process", "run_python", "benchmark_model",
+    "auto_optimize_inference",
 }
 
 # Tools that need confirmation before execution (destructive)

@@ -697,3 +697,99 @@ class Tools:
         if err:
             return f"{out}\n[stderr/error]\n{err}".strip()
         return out.strip() or "(no output)"
+
+    # ─── 20. benchmark_model ─────────────────────────────────────
+    def benchmark_model(self, max_tokens: int = 100, port: int = 8001) -> str:
+        """
+        Run a speed benchmark on the currently loaded model.
+        Generates tokens and measures tokens/sec.
+
+        Args:
+            max_tokens: Number of tokens to generate (default 100).
+            port: llama-server port (default 8001).
+
+        Returns:
+            JSON with tokens_per_second, total_tokens, duration.
+        """
+        try:
+            sys.path.insert(0, str(_REPO_ROOT))
+            from extensions.model_manager.auto_optimizer import run_benchmark
+            result = run_benchmark(port=port, max_tokens=max_tokens)
+            return json.dumps({
+                "tokens_per_second": result.tokens_per_second,
+                "total_tokens": result.total_tokens,
+                "duration_seconds": result.duration_seconds,
+                "success": result.success,
+                "error": result.error,
+            }, indent=2)
+        except Exception as e:
+            return f"Error running benchmark: {e}"
+
+    # ─── 21. auto_optimize_inference ─────────────────────────────
+    def auto_optimize_inference(self, max_iterations: int = 10) -> str:
+        """
+        Self-optimize the current model's inference settings.
+        Runs an autoresearch-style loop: benchmark → tweak flag → benchmark
+        → keep if faster → repeat. The AI optimizes its own engine.
+
+        This tool will restart llama-server multiple times with different
+        settings and measure which is fastest. Takes several minutes.
+
+        Args:
+            max_iterations: Maximum experiments to try (default 10).
+
+        Returns:
+            Optimization report with baseline vs final speed, improvements found,
+            and the optimal command.
+        """
+        if not _HAS_REQUESTS:
+            return "Error: requests library not available"
+        try:
+            # Call the auto-optimize API endpoint which handles the full loop
+            resp = _req.post(
+                "http://localhost:3000/api/localai/auto-optimize",
+                json={"max_iterations": max_iterations},
+                stream=True,
+                timeout=600,  # 10 min max
+            )
+
+            events = []
+            last_report = None
+            for line in resp.iter_lines(decode_unicode=True):
+                if line and line.startswith("data: "):
+                    try:
+                        event = json.loads(line[6:])
+                        step = event.get("step", "")
+
+                        if step == "complete":
+                            last_report = event.get("report", {})
+                        elif step == "improvement":
+                            events.append(f"✓ {event.get('message', '')}")
+                        elif step == "reverted":
+                            events.append(f"✗ {event.get('message', '')}")
+                        elif step == "error":
+                            return f"Error: {event.get('message', 'Unknown error')}"
+                    except json.JSONDecodeError:
+                        pass
+
+            if last_report:
+                summary = (
+                    f"Auto-Optimization Complete!\n"
+                    f"{'=' * 40}\n"
+                    f"Model: {last_report.get('model_name', '?')}\n"
+                    f"Baseline: {last_report.get('baseline_tps', 0)} t/s\n"
+                    f"Final:    {last_report.get('final_tps', 0)} t/s\n"
+                    f"Improvement: +{last_report.get('total_improvement_pct', 0)}%\n"
+                    f"Experiments: {last_report.get('total_iterations', 0)}\n"
+                    f"Improvements kept: {last_report.get('improvements_found', 0)}\n"
+                    f"Duration: {last_report.get('duration_seconds', 0)}s\n"
+                    f"\nExperiment log:\n" +
+                    "\n".join(events) +
+                    f"\n\nOptimal command:\n{last_report.get('command_preview', '')}"
+                )
+                return summary
+            else:
+                return "Optimization completed but no report generated.\nLog:\n" + "\n".join(events)
+
+        except Exception as e:
+            return f"Error in auto_optimize: {e}"
