@@ -185,6 +185,11 @@ function renderModelCard(model) {
   const actions = [];
   if (isLoaded) {
     actions.push(el('button', { class: 'btn btn--danger btn--sm', onclick: handleEject }, '⏏ Eject'));
+    actions.push(el('button', {
+      class: 'btn btn--ghost btn--sm',
+      onclick: () => handleAutoOptimize(model),
+      title: 'Run auto-optimization (benchmarks different settings to find fastest config)',
+    }, '⚡ Optimize'));
     actions.push(el('button', { class: 'btn btn--ghost btn--sm', onclick: () => openSettings(model) }, '⚙ Settings'));
   } else if (isLoading) {
     actions.push(el('button', { class: 'btn btn--ghost btn--sm', onclick: handleEject }, '✕ Cancel'));
@@ -424,6 +429,144 @@ async function handleEject() {
     renderModelList();
   } catch (e) {
     showError(`Eject failed: ${e.message}`);
+  }
+}
+
+// ─── Auto-optimize ───────────────────────────────────────────────
+function handleAutoOptimize(model) {
+  if (!confirm(
+    `Run auto-optimization for ${model.name}?\n\n` +
+    `This will restart the model multiple times with different settings ` +
+    `to find the fastest configuration.\n\n` +
+    `The model will be unavailable during optimization (2-5 minutes).\n` +
+    `Chat will pause until complete.`
+  )) return;
+
+  // Show the optimize overlay
+  const overlay = $('#load-overlay');
+  overlay.classList.remove('hidden');
+  $('#load-model-name').textContent = `Optimizing: ${model.name}`;
+  $('#load-progress-fill').style.width = '0%';
+
+  state.loadStartTime = Date.now();
+  startElapsedTimer();
+
+  const optimizeLog = [];
+  let totalExperiments = 10;
+  let currentExperiment = 0;
+
+  // Render optimize-specific steps
+  const stepsEl = $('#load-steps');
+  stepsEl.innerHTML = '';
+  stepsEl.append(
+    el('div', { class: 'load-step' },
+      el('div', { class: 'step-icon step-icon--active' }, '⟳'),
+      el('span', { class: 'step-text--active' }, 'Running baseline benchmark...')
+    )
+  );
+
+  // Connect SSE
+  fetch(`${API}/auto-optimize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_path: model.path, max_iterations: 10 }),
+  }).then(async res => {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const event = JSON.parse(line.slice(6));
+          handleOptimizeEvent(event, stepsEl, optimizeLog);
+        } catch {}
+      }
+    }
+  }).catch(e => {
+    handleOptimizeEvent({ step: 'error', message: e.message }, stepsEl, optimizeLog);
+  });
+}
+
+function handleOptimizeEvent(event, stepsEl, logArr) {
+  const step = event.step;
+  if (step === 'done') return;
+
+  if (step === 'error') {
+    hideLoadOverlay();
+    showError(event.message || 'Optimization failed');
+    loadStatus();
+    renderModelList();
+    return;
+  }
+
+  if (step === 'baseline_done') {
+    stepsEl.innerHTML = '';
+    stepsEl.append(
+      el('div', { class: 'load-step' },
+        el('div', { class: 'step-icon step-icon--done' }, '✓'),
+        el('span', { class: 'step-text--done' }, `Baseline: ${event.tps} t/s`)
+      )
+    );
+  }
+
+  if (step === 'experiment') {
+    $('#load-progress-fill').style.width =
+      `${Math.round((event.iteration / 10) * 100)}%`;
+    // Update last step to show current experiment
+    const existing = stepsEl.querySelectorAll('.opt-experiment');
+    if (existing.length > 5) existing[0].remove(); // Keep last 5 visible
+    stepsEl.append(
+      el('div', { class: 'load-step opt-experiment' },
+        el('div', { class: 'step-icon step-icon--active' }, '⟳'),
+        el('span', { class: 'step-text--active' }, event.message)
+      )
+    );
+  }
+
+  if (step === 'improvement') {
+    logArr.push(event);
+    const last = stepsEl.querySelector('.opt-experiment:last-child');
+    if (last) {
+      last.querySelector('.step-icon').className = 'step-icon step-icon--done';
+      last.querySelector('.step-icon').textContent = '✓';
+      last.querySelector('span').className = 'step-text--done';
+      last.querySelector('span').textContent = event.message;
+    }
+  }
+
+  if (step === 'reverted') {
+    const last = stepsEl.querySelector('.opt-experiment:last-child');
+    if (last) {
+      last.querySelector('.step-icon').className = 'step-icon step-icon--pending';
+      last.querySelector('.step-icon').textContent = '✗';
+      last.querySelector('span').className = 'step-text--pending';
+      last.querySelector('span').textContent = event.message;
+    }
+  }
+
+  if (step === 'complete') {
+    $('#load-progress-fill').style.width = '100%';
+    const report = event.report || {};
+    stepsEl.append(
+      el('div', { class: 'load-step', style: 'margin-top:12px' },
+        el('div', { class: 'step-icon step-icon--done' }, '★'),
+        el('span', { class: 'step-text--done', style: 'font-weight:600' },
+          `Done! ${report.baseline_tps} → ${report.final_tps} t/s (+${report.total_improvement_pct}%)`
+        )
+      )
+    );
+    setTimeout(() => {
+      hideLoadOverlay();
+      loadStatus();
+      renderModelList();
+    }, 3000);
   }
 }
 

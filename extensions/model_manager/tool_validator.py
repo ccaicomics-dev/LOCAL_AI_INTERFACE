@@ -55,7 +55,7 @@ _KNOWN_TOOLS = {
     "find_models_on_system", "web_search", "web_fetch", "todo_write",
     "ask_user_question", "schedule_task", "analyze_code",
     "manage_process", "run_python", "benchmark_model",
-    "auto_optimize_inference",
+    "get_optimization_results",
 }
 
 # Tools that need confirmation before execution (destructive)
