@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LocalAI Platform</title>
+  <link rel="stylesheet" href="/api/localai/frontend/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Hardware Stats Bar ──────────────────────────────────── -->
+  <div class="hardware-bar" id="hardware-bar">
+    <div class="hw-item">
+      <div class="hw-label">Status</div>
+      <div class="hw-name text-muted">Detecting hardware...</div>
+    </div>
+  </div>
+
+  <!-- ── Main Content ───────────────────────────────────────── -->
+  <div class="main-content">
+    <div class="section-header">
+      <span class="section-title">Models</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn-scan" id="btn-app-settings">⚙ Settings</button>
+        <button class="btn-scan" id="btn-scan">⟳ Scan</button>
+      </div>
+    </div>
+
+    <div class="model-list" id="model-list">
+      <div class="empty-state">
+        <h3>Scanning for models...</h3>
+        <p>Looking for GGUF files in configured directories.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Status Bar ─────────────────────────────────────────── -->
+  <div class="status-bar" id="status-bar">
+    <span class="text-muted">● Starting...</span>
+  </div>
+
+</div><!-- /#app -->
+
+<!-- ── Load Progress Overlay ──────────────────────────────────── -->
+<div class="overlay hidden" id="load-overlay">
+  <div class="overlay-card">
+    <div class="overlay-title" id="load-model-name">Loading model...</div>
+
+    <div class="load-steps" id="load-steps">
+      <!-- Populated by JS -->
+    </div>
+
+    <div class="overlay-progress-track">
+      <div class="overlay-progress-fill" id="load-progress-fill" style="width:0%"></div>
+    </div>
+
+    <div class="overlay-elapsed" id="load-elapsed">0s elapsed</div>
+
+    <div style="display:flex;justify-content:flex-end">
+      <button class="btn btn--ghost btn--sm" id="btn-cancel-load">✕ Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Settings Panel ─────────────────────────────────────────── -->
+<div class="settings-panel" id="settings-panel">
+  <div class="settings-header">
+    <div>
+      <div class="settings-title">Model Settings</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px" id="settings-model-name"></div>
+    </div>
+    <button class="btn btn--ghost btn--sm" id="btn-close-settings">✕</button>
+  </div>
+
+  <div class="settings-body">
+
+    <div class="form-group">
+      <label class="form-label" for="set-ctx">Context Size</label>
+      <input class="form-control" type="number" id="set-ctx" placeholder="auto"
+        min="2048" max="131072" step="2048">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px" id="ctx-auto-hint"></div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="set-threads">CPU Threads</label>
+      <input class="form-control" type="number" id="set-threads" placeholder="auto"
+        min="1" max="128">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="set-gpu-layers">GPU Layers</label>
+      <input class="form-control" type="number" id="set-gpu-layers" value="999"
+        min="0" max="999">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label" for="set-kv">KV Cache Quantization</label>
+      <select class="form-control" id="set-kv">
+        <option value="q8_0">Q8_0 (default — balanced)</option>
+        <option value="q4_0">Q4_0 (smaller, lower quality)</option>
+        <option value="f16">F16 (full precision)</option>
+      </select>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">MoE Expert Offload</div>
+        <div class="toggle-sublabel">Routes expert layers to RAM for 4× speed</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="set-moe" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div>
+        <div class="toggle-label">Flash Attention</div>
+        <div class="toggle-sublabel">NVIDIA only — improves speed and VRAM</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="set-flash" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="form-label" style="margin-top:8px">Command Preview</div>
+    <pre class="command-preview" id="command-preview">Loading...</pre>
+
+  </div><!-- /.settings-body -->
+
+  <div class="settings-footer">
+    <button class="btn btn--ghost btn--sm" id="btn-reset-settings">Reset to Auto</button>
+    <button class="btn btn--ghost btn--sm" id="btn-save-settings">Save</button>
+    <button class="btn btn--primary btn--sm" id="btn-load-with-settings">Load ▶</button>
+  </div>
+</div><!-- /#settings-panel -->
+
+<script src="/api/localai/frontend/app.js"></script>
+</body>
+</html>

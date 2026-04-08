@@ -1,0 +1,8 @@
+{
+  "llama_server_path": null,
+  "model_dirs": [],
+  "default_ctx_size": null,
+  "port": 3000,
+  "llama_port": 8001,
+  "auto_open_browser": true
+}
